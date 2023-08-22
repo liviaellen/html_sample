@@ -16,38 +16,44 @@ def clean_html(html_file):
 
     # Clean up any invalid attributes in the table tags
     for table in soup.find_all('table'):
-        table.attrs = {}
+        for attr in list(table.attrs.keys()):
+            del table.attrs[attr]
         for tag in table.find_all(True):
-            tag.attrs = {}
+            for attr in list(tag.attrs.keys()):
+                del tag.attrs[attr]
+
     return soup
 
-def extract_table_from_html(html_string):
-    soup = BeautifulSoup(html_string, 'html.parser')
-    table = soup.find('table')
-    if table is None:
-        return None
-    rows = table.find_all('tr')
-    header = [th.text.strip() for th in rows[0].find_all('th')]
-    data = []
-    for row in rows[1:]:
-        data.append([td.text.strip() for td in row.find_all('td')])
-    df = pd.DataFrame(data, columns=header)
-    return df
 
 def extract_tables_from_html(html_file):
     soup = clean_html(html_file)
     tables = soup.find_all('table')
-    dataframes = [extract_table_from_html(str(table)) for table in tables]
-    return dataframes
+    return tables
 
 def save_tables_to_csv(tables, output_folder):
+    table_data = []
     for i, table in enumerate(tables):
-        if table is not None:
-            if not os.path.exists(output_folder):
-                os.makedirs(output_folder)
-            csv_file = os.path.join(output_folder, f'table_{i}.csv')
-            table.to_csv(csv_file, index=False)
-            print(f'Saved table {i} to {csv_file}')
+        df = pd.read_html(str(table), header=0)[0]
+        table_data.append(df)
+
+    # Check for tables that span multiple pages
+    merged_data = []
+    current_table = table_data[0]
+    for i in range(1, len(table_data)):
+        if len(table_data[i].columns) == len(current_table.columns) and all(table_data[i].columns == current_table.columns):
+            current_table = pd.concat([current_table, table_data[i]], ignore_index=True)
+        else:
+            merged_data.append(current_table)
+            current_table = table_data[i]
+    merged_data.append(current_table)
+
+    # Save the merged tables to CSV files
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    for i, data in enumerate(merged_data):
+        csv_file = os.path.join(output_folder, f'table_{i}.csv')
+        data.to_csv(csv_file, index=False)
+        print(f'Saved table {i} to {csv_file}')
 
 def process_html_files(input_folder, output_folder):
     html_files = glob.glob(os.path.join(input_folder, '*.html'))
