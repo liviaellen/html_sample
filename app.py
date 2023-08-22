@@ -1,75 +1,42 @@
 from bs4 import BeautifulSoup
 import pandas as pd
 import os
-import glob
-import re
 import sys
-import datetime
 import time
+import datetime
+import glob
 
-def clean_html(html_file):
+def extract_tables_from_html(html_file):
     with open(html_file, 'r', encoding='utf-8') as file:
         soup = BeautifulSoup(file, 'html.parser')
+    file_name = html_file.split('/')[-1].split('.')[0]
+    tables = soup.find_all('table')
+    return tables, file_name
 
-    # Find all elements that resemble table tags and rewrite them
-    for tag in soup.find_all(True):
-        if re.match(r'table|thead|tbody|tr|th|td', tag.name, re.IGNORECASE):
-            tag.name = tag.name.lower()
-
-    # Clean up any invalid attributes in the table tags
-    for table in soup.find_all('table'):
-        table.attrs = {}
-        for tag in table.find_all(True):
-            tag.attrs = {}
-    return soup
-
-def extract_table_from_html(html_string):
-    soup = BeautifulSoup(html_string, 'html.parser')
-    table = soup.find('table')
-    if table is None:
-        return None
-    rows = table.find_all('tr')
-    header = [th.text.strip() for th in rows[0].find_all('th')]
-    data = []
-    for row in rows[1:]:
-        data.append([td.text.strip() for td in row.find_all('td')])
-    df = pd.DataFrame(data, columns=header)
-    return df
-
-def extract_tables_from_html(html_string):
-    soup = BeautifulSoup(html_string, 'html.parser')
-    table = soup.find('table')
-    if table is None:
-        return None
-
-    rows = table.find_all('tr')
-    header = [th.text.strip() for th in rows[0].find_all('th')]
-    data = []
-
-    # Skip the first row if there are headers, otherwise start from the first row
-    start_index = 1 if header else 0
-
-    for row in rows[start_index:]:
-        data.append([td.text.strip() for td in row.find_all('td')])
-
-    # If there are no headers, set header=None
-    if not header:
-        header = None
-
-    df = pd.DataFrame(data, columns=header)
-    return df
-
-
-def save_tables_to_csv(tables, output_folder):
-    # Filter out None values from the tables list
-    tables = [table for table in tables if table is not None]
+def save_tables_to_csv(tables, file_name, output_folder):
+    table_data = []
     for i, table in enumerate(tables):
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-        csv_file = os.path.join(output_folder, f'table_{i}.csv')
-        table.to_csv(csv_file, index=False)
-        print(f'Saved table {i} to {csv_file}')
+        try:
+            df = pd.read_html(str(table), header=0)[0]
+        except ValueError as e:
+            print(f'Error reading table {i} in {file_name}: {e}')
+            continue
+        table_data.append(df)
 
+    merged_data = []
+    current_table = table_data[0]
+    for i in range(1, len(table_data)):
+        if len(table_data[i].columns) == len(current_table.columns) and all(table_data[i].columns == current_table.columns):
+            current_table = pd.concat([current_table, table_data[i]], ignore_index=True)
+        else:
+            merged_data.append(current_table)
+            current_table = table_data[i]
+    merged_data.append(current_table)
+
+    for i, data in enumerate(merged_data):
+        csv_file = os.path.join(output_folder, f'{file_name}_table_{i}.csv')
+        data.to_csv(csv_file, index=False)
+        print(f'Saved table {i} to {csv_file}')
 
 def process_html_files(input_folder, output_folder):
     log_data = []
@@ -79,16 +46,16 @@ def process_html_files(input_folder, output_folder):
         start_time = time.time()
 
         print(f'Processing {html_file}...')
-        html_name = os.path.basename(html_file).split('.')[0]
-        folder_name = f'{str(i).zfill(4)}_{html_name}'
-        output_dir = os.path.join(output_folder, folder_name)
-        tables = extract_tables_from_html(html_file)
-
-        if tables is None:
+        tables, file_name = extract_tables_from_html(html_file)
+        if not tables:
             print(f'No tables found in {html_file}.')
             continue
 
-        save_tables_to_csv(tables, output_dir)
+        output_dir = os.path.join(output_folder, f'{str(i).zfill(4)}_{file_name}')
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        save_tables_to_csv(tables, file_name, output_dir)
 
         elapsed_time = time.time() - start_time
 
@@ -98,16 +65,11 @@ def process_html_files(input_folder, output_folder):
             'number_of_tables_extracted': len(tables)
         })
 
-    # Save the log data to a CSV file with a name based on the current date and time
     log_filename = f"{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}_log.csv"
     log_df = pd.DataFrame(log_data)
     log_df.to_csv(log_filename, index=False)
 
-
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        print("Usage: python app.py input_folder output_folder")
-        sys.exit(1)
     input_folder = sys.argv[1]
     output_folder = sys.argv[2]
     process_html_files(input_folder, output_folder)
