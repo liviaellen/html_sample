@@ -34,12 +34,17 @@ def save_tables_to_csv(tables, file_name, output_folder):
     merged_data.append(current_table)
 
     for i, data in enumerate(merged_data):
-        csv_file = os.path.join(output_folder, f'{file_name}_table_{i}.csv')
+        csv_file = os.path.join(output_folder, f'{file_name}_table_{i+1}.csv')
         data.to_csv(csv_file, index=False)
-        print(f'Saved table {i} to {csv_file}')
+        print(f'Saved table {i+1} to {csv_file}')
 
 def process_html_files(input_folder, output_folder):
     log_data = []
+    log_messages = []
+
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
+    output_folder = os.path.join(output_folder, timestamp)
+    os.makedirs(output_folder, exist_ok=True)
 
     html_files = glob.glob(os.path.join(input_folder, '*.html'))
     for i, html_file in enumerate(html_files):
@@ -59,15 +64,21 @@ def process_html_files(input_folder, output_folder):
 
         elapsed_time = time.time() - start_time
 
-        log_data.append({
+        log_entry = {
             'datetime_execution': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'seconds_taken': elapsed_time,
             'number_of_tables_extracted': len(tables)
-        })
+        }
+        log_data.append(log_entry)
 
-    log_filename = f"{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}_log.csv"
+        log_messages.append(f"Processed {file_name}, extracted {len(tables)} tables, took {elapsed_time} seconds.")
+
+    log_filename = os.path.join(output_folder, f"{datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}_log.csv")
     log_df = pd.DataFrame(log_data)
     log_df.to_csv(log_filename, index=False)
+
+    return log_messages
+
 
 if __name__ == '__main__':
     input_folder = sys.argv[1]
