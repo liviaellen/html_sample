@@ -1,64 +1,86 @@
 import streamlit as st
-import pandas as pd
 import os
+import pandas as pd
+import subprocess
+import glob
 import plotly.express as px
-from app import process_html_files
-from datetime import datetime
 
-def get_files_in_folder(folder):
-    files = [file for file in os.listdir(folder) if os.path.isfile(os.path.join(folder, file))]
-    return sorted(files)
+def show_dataframe(file_path):
+    if file_path is None:
+        st.warning("Please select a valid CSV file.")
+        return None
+    try:
+        df = pd.read_csv(file_path)
+        st.write(df)
+        return df
+    except Exception as e:
+        st.error(f"Failed to load the DataFrame. Error: {e}")
+        return None
+
+def plot_dataframe(df):
+    if df is None:
+        st.warning("No DataFrame to visualize.")
+        return
+
+    columns = df.columns.tolist()
+    x_axis = st.selectbox("Select the X-axis:", columns)
+    y_axis = st.selectbox("Select the Y-axis:", columns)
+    plot_type = st.selectbox("Select the plot type:", ["Line Plot", "Bar Chart", "Scatter Plot"])
+
+    if plot_type == "Line Plot":
+        fig = px.line(df, x=x_axis, y=y_axis)
+    elif plot_type == "Bar Chart":
+        fig = px.bar(df, x=x_axis, y=y_axis)
+    else:
+        fig = px.scatter(df, x=x_axis, y=y_axis)
+
+    st.plotly_chart(fig)
 
 def main():
-    st.title("HTML Table Extractor and Visualizer")
+    st.title("HTML Table Extraction Tool")
 
-    input_folder = "data"  # Default input folder
-    output_folder = "output"
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-    folders = sorted(os.listdir(output_folder), reverse=True)
-    default_output_folder = os.path.join(output_folder, folders[0]) if folders else output_folder
+    # Step 1: Select Input Folder and Run HTML Extraction
+    st.header("Step 1: Select Input Folder and Run HTML Extraction")
+    input_folder = st.text_input("Enter the path to the input folder:", "data")
+    if st.button("Run HTML Extraction"):
+        st.write(f"Processing HTML files in '{input_folder}'...")
+        process = subprocess.Popen(["make", "run", f"INPUT={input_folder}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        if process.returncode == 0:
+            st.success(f"HTML files in '{input_folder}' have been processed.")
+            st.write(f"Log output:\n{stdout.decode()}")
+        else:
+            st.error(f"Failed to process HTML files. Error:\n{stderr.decode()}")
 
-    st.text_input("Enter output folder where CSVs are saved:", default_output_folder)
+    # Step 2: Select and Display CSV Files
+    st.header("Step 2: Select and Display CSV Files")
+    output_folder = st.text_input("Enter the path to the output folder:", "output")
+    output_folders = glob.glob(os.path.join(output_folder, "*"))
+    if not output_folders:
+        st.warning("No output folders found.")
+        return
+    selected_output_folder = st.selectbox("Select the timestamped output folder:", output_folders)
 
-    # Start the extraction process
-    if st.button("Start Extraction"):
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        new_output_folder = os.path.join(output_folder, f"output_{timestamp}")
-        st.write("Extracting tables from HTML files...")
-        logs = process_html_files(input_folder, new_output_folder)
-        st.write("Extraction completed!")
-        for log in logs:
-            st.write(log)
+    csv_files = glob.glob(os.path.join(selected_output_folder, "*/*.csv"))
+    if not csv_files:
+        st.warning("No CSV files found in the selected output folder.")
+        return
+    selected_csv = st.selectbox("Select a CSV file to visualize:", csv_files, index=0)
+    df = show_dataframe(selected_csv)
 
-    # Display the dataframes and log file
-    if st.button("Visualize"):
-        folders = sorted(os.listdir(output_folder), reverse=True)
-        selected_document = st.selectbox("Select a document:", folders)
-        st.write(f"Selected document: {selected_document}")
+    # Data Visualization
+    st.header("Data Visualization")
+    plot_dataframe(df)
 
-        selected_document_folder = os.path.join(output_folder, selected_document)
-        csv_files = get_files_in_folder(selected_document_folder)
-        selected_csv = st.selectbox("Select a CSV file:", csv_files)
-        st.write(f"Selected CSV file: {selected_csv}")
-
-        df = pd.read_csv(os.path.join(selected_document_folder, selected_csv))
-        st.write(df)
-
-        st.subheader("Log File:")
-        log_files = [file for file in get_files_in_folder(output_folder) if file.endswith('_log.csv')]
-        if log_files:
-            log_file = log_files[0]
-            log_df = pd.read_csv(os.path.join(output_folder, log_file))
-            st.write(log_df)
-
-        # Visualize dataframe
-        if st.checkbox("Show visualization"):
-            columns = df.columns
-            x_axis = st.selectbox("Select X-axis:", columns)
-            y_axis = st.selectbox("Select Y-axis:", columns)
-            fig = px.line(df, x=x_axis, y=y_axis)
-            st.plotly_chart(fig)
+    # Display Log File
+    st.header("View Log File")
+    log_files = glob.glob(os.path.join(selected_output_folder, "*_log.csv"))
+    if log_files:
+        log_file = log_files[0]
+        if st.button("View Log"):
+            show_dataframe(log_file)
+    else:
+        st.warning("No log files found in the selected output folder.")
 
 if __name__ == "__main__":
     main()
